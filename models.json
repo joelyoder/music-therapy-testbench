@@ -1,0 +1,11 @@
+{
+  "_comment": "Allowlist of models shown in the picker. 'id' is the OpenRouter model id (see openrouter.ai/models). Prices are USD per 1M tokens and only used as a fallback if OpenRouter does not report cost. VERIFY these ids/prices against openrouter.ai before relying on them.",
+  "models": [
+    {"id": "anthropic/claude-haiku-4.5",       "label": "Claude Haiku 4.5 (cheap)",      "in": 1.0,  "out": 5.0},
+    {"id": "anthropic/claude-sonnet-4.5",      "label": "Claude Sonnet 4.5 (mid)",       "in": 3.0,  "out": 15.0},
+    {"id": "openai/gpt-5-mini",                "label": "GPT-5 mini (cheap)",            "in": 0.25, "out": 2.0},
+    {"id": "google/gemini-2.5-flash",          "label": "Gemini 2.5 Flash (cheap)",      "in": 0.3,  "out": 2.5},
+    {"id": "deepseek/deepseek-chat-v3.1",      "label": "DeepSeek V3.1 (very cheap)",    "in": 0.2,  "out": 0.8},
+    {"id": "meta-llama/llama-3.3-70b-instruct","label": "Llama 3.3 70B (very cheap)",    "in": 0.13, "out": 0.4}
+  ]
+}
