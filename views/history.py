@@ -46,10 +46,17 @@ st.download_button("Download filtered runs (CSV)", df.drop(columns=["prompt"]).t
 if len(df):
     rid = st.selectbox("Inspect a run", df["id"].tolist())
     r = df[df["id"] == rid].iloc[0]
-    st.markdown(f"**{r['model']}** · {r['prompt']} · rating: {r['rating']} · notes: {r['notes'] or '-'}")
-    if r["error"]:
-        st.error(r["error"])
+
+    def val(key):
+        v = r[key]
+        return None if pd.isna(v) else v  # pandas turns missing values into NaN; treat as empty
+
+    rating = val("rating")
+    st.markdown(f"**{r['model']}** · {r['prompt']} · rating: {int(rating) if rating is not None else 'unrated'}"
+                f" · notes: {val('notes') or '-'}")
+    if val("error"):
+        st.error(val("error"))
     t1, t2, t3 = st.tabs(["Output", "Message sent", "System prompt"])
-    t1.markdown(r["output"] or "")
-    t2.code(r["rendered_user_prompt"] or "", language="markdown")
-    t3.code(r["system_prompt"] or "", language="markdown")
+    t1.markdown(val("output") or "")
+    t2.code(val("rendered_user_prompt") or "", language="markdown")
+    t3.code(val("system_prompt") or "", language="markdown")
