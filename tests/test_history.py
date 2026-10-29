@@ -21,11 +21,22 @@ def test_history_shows_clean_run_without_nan(tmp_path, monkeypatch):
     db.insert_run(dict(user_email="a@b.c", model="x/y", output="OTHER", prompt_version_id=1, rating=4,
                        notes="nice"), eng)
 
+    # a failed run, so the error column mixes text and empty values (this is what triggered the bug)
+    db.insert_run(dict(user_email="a@b.c", model="x/z", output="", error="RuntimeError: boom",
+                       prompt_version_id=1), eng)
+
     at = AppTest.from_file(str(ROOT / "views/history.py"), default_timeout=30)
     at.session_state["user"] = "a@b.c"
     at.run()
     assert not at.exception, at.exception
-    assert not at.error, [e.value for e in at.error]
+    # inspect each run in turn; only the failed one may show an error box
+    ids = at.selectbox[-1].options
+    for rid in ids:
+        at.selectbox[-1].select(rid).run()
+        assert not at.exception, at.exception
+        errs = [e.value for e in at.error]
+        assert all("boom" in e for e in errs), errs
+        assert "nan" not in " ".join(m.value for m in at.markdown).lower().replace("financ", "")
     shown = " ".join(m.value for m in at.markdown)
     assert "nan" not in shown.lower().replace("financ", "")
     assert "unrated" in shown or "rating: 4" in shown
