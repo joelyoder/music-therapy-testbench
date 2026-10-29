@@ -1,9 +1,15 @@
-import json
+import math
+import re
 
 import pandas as pd
 import streamlit as st
 
 from lib import db
+from lib.config import secret
+
+TZ = secret("display_timezone", "America/New_York")
+PAGE_SIZES = [10, 25, 50]
+COLS = [0.5, 1.3, 1.2, 2.2, 1.7, 0.9, 1.0, 0.7, 2.6, 1.1]  # id, when, user, model, prompt, rating, cost, time, preview, button
 
 st.title("Run History")
 rows = db.fetch_runs()
@@ -11,10 +17,24 @@ if not rows:
     st.info("No runs yet. Generate something in the Playground.")
     st.stop()
 
+
+def preview(text: str, n: int = 70) -> str:
+    """One plain line from model output: no markdown headings/emphasis, and $ escaped so it isn't read as math."""
+    flat = re.sub(r"[#*_`>\[\]]", "", text).replace("$", r"\$")
+    flat = re.sub(r"\s+", " ", flat).strip()
+    return flat[:n] + ("…" if len(flat) > n else "")
+
+
+def clean(v):
+    """pandas turns missing values into NaN; treat them as empty."""
+    return None if pd.isna(v) else v
+
+
 versions = {v["id"]: f'#{v["id"]} {v["name"]}' for v in db.list_prompt_versions()}
 df = pd.DataFrame(rows)
 df["prompt"] = df["prompt_version_id"].map(versions).fillna("(edited, unsaved)")
 
+# ---------------- Filters ----------------
 c1, c2, c3, c4 = st.columns(4)
 f_model = c1.multiselect("Model", sorted(df["model"].dropna().unique()))
 f_prompt = c2.multiselect("Prompt version", sorted(df["prompt"].unique()))
@@ -28,35 +48,85 @@ if f_rating == "rated only": df = df[df["rating"].notna()]
 elif f_rating == "4+": df = df[df["rating"] >= 4]
 elif f_rating == "<= 2": df = df[df["rating"] <= 2]
 
-# Summary per model x prompt: this is the cost-vs-quality table
+# ---------------- Summary (cost vs quality) ----------------
 st.subheader("Summary by model and prompt")
 if len(df):
     summary = (df.groupby(["model", "prompt"], dropna=False)
                  .agg(runs=("id", "count"), avg_rating=("rating", "mean"), rated=("rating", "count"),
                       avg_cost_usd=("cost_usd", "mean"), avg_latency_s=("latency_ms", lambda s: s.mean() / 1000))
                  .round(4).reset_index())
-    st.dataframe(summary, use_container_width=True, hide_index=True)
+    st.dataframe(summary, width="stretch", hide_index=True)
 
+
+# ---------------- Run preview (pop-up) ----------------
+@st.dialog("Run details", width="large")
+def show_run(r: dict):
+    rating = clean(r["rating"])
+    st.markdown(f"**{r['model']}** · {r['prompt']} · rating: {int(rating) if rating is not None else 'unrated'}"
+                f" · notes: {clean(r['notes']) or '-'}")
+    cost, tin, tout, ms = clean(r["cost_usd"]), clean(r["tokens_in"]), clean(r["tokens_out"]), clean(r["latency_ms"])
+    st.caption(f"Run #{r['id']} · {r['when']} · `{r['user_email'] or 'unknown user'}` · "
+               f"{int(tin) if tin is not None else '?'} in / {int(tout) if tout is not None else '?'} out tokens · "
+               f"{f'{ms / 1000:.1f}s' if ms is not None else 'time n/a'} · "
+               + (f"${cost:.4f}" if cost is not None else "cost n/a"))
+    if clean(r["error"]):
+        st.error(clean(r["error"]))
+    t1, t2, t3 = st.tabs(["Output", "Message sent", "System prompt"])
+    t1.markdown(clean(r["output"]) or "")
+    t2.code(clean(r["rendered_user_prompt"]) or "", language="markdown")
+    t3.code(clean(r["system_prompt"]) or "", language="markdown")
+
+
+# ---------------- Table with pagination ----------------
 st.subheader("All runs")
-show = df[["id", "created_at", "user_email", "model", "prompt", "rating", "cost_usd", "latency_ms", "notes"]]
-st.dataframe(show, use_container_width=True, hide_index=True)
 st.download_button("Download filtered runs (CSV)", df.drop(columns=["prompt"]).to_csv(index=False),
                    "runs.csv", "text/csv")
+if df.empty:
+    st.info("No runs match these filters.")
+    st.stop()
 
-if len(df):
-    rid = st.selectbox("Inspect a run", df["id"].tolist())
-    r = df[df["id"] == rid].iloc[0]
+df = df.copy()
+df["when"] = pd.to_datetime(df["created_at"], utc=True).dt.tz_convert(TZ).dt.strftime("%b %d, %H:%M")
 
-    def val(key):
-        v = r[key]
-        return None if pd.isna(v) else v  # pandas turns missing values into NaN; treat as empty
+pc1, pc2, pc3, pc4 = st.columns([1.2, 1, 3, 1], vertical_alignment="center")
+page_size = pc1.selectbox("Rows per page", PAGE_SIZES, key="hist_page_size")
+total = len(df)
+pages = max(1, math.ceil(total / page_size))
 
-    rating = val("rating")
-    st.markdown(f"**{r['model']}** · {r['prompt']} · rating: {int(rating) if rating is not None else 'unrated'}"
-                f" · notes: {val('notes') or '-'}")
-    if val("error"):
-        st.error(val("error"))
-    t1, t2, t3 = st.tabs(["Output", "Message sent", "System prompt"])
-    t1.markdown(val("output") or "")
-    t2.code(val("rendered_user_prompt") or "", language="markdown")
-    t3.code(val("system_prompt") or "", language="markdown")
+# go back to page 1 whenever the filters or page size change
+sig = (tuple(f_model), tuple(f_prompt), tuple(f_user), f_rating, page_size)
+if st.session_state.get("hist_sig") != sig:
+    st.session_state["hist_sig"] = sig
+    st.session_state["hist_page"] = 0
+page = min(st.session_state.get("hist_page", 0), pages - 1)
+
+
+def go(delta):
+    st.session_state["hist_page"] = min(max(page + delta, 0), pages - 1)
+
+
+pc2.button("◀ Prev", on_click=go, args=(-1,), disabled=page == 0, width="stretch")
+pc3.markdown(f"<div style='text-align:center'>Page {page + 1} of {pages} · {total} runs</div>", unsafe_allow_html=True)
+pc4.button("Next ▶", on_click=go, args=(1,), disabled=page >= pages - 1, width="stretch")
+
+header = st.columns(COLS)
+for col, name in zip(header, ["ID", "When (ET)" if TZ == "America/New_York" else "When", "User", "Model", "Prompt",
+                              "Rating", "Cost", "Time", "Output preview", ""]):
+    col.markdown(f"**{name}**")
+
+for r in df.iloc[page * page_size:(page + 1) * page_size].to_dict("records"):
+    c = st.columns(COLS, vertical_alignment="center")
+    rating, cost, ms = clean(r["rating"]), clean(r["cost_usd"]), clean(r["latency_ms"])
+    out, err = clean(r["output"]) or "", clean(r["error"])
+    c[0].write(r["id"])
+    c[1].write(r["when"])
+    c[2].write((r["user_email"] or "?").split("@")[0])
+    c[3].write(r["model"])
+    c[4].write(r["prompt"])
+    c[5].write("★" * int(rating) if rating is not None else "—")
+    c[6].write(f"${cost:.4f}" if cost is not None else "—")
+    c[7].write(f"{ms / 1000:.1f}s" if ms is not None else "—")
+    c[8].caption("⚠ error" if err and not out else preview(out))
+    if c[9].button("View", key=f"view_{r['id']}", width="stretch"):
+        show_run(r)
+    st.divider()

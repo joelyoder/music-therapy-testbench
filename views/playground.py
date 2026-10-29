@@ -32,7 +32,7 @@ with st.expander("1. System prompt & template", expanded=True):
         st.info("You have unsaved edits. Runs will use your edited text, but save a version to keep it.")
     c1, c2 = st.columns([3, 1])
     new_name = c1.text_input("Name for new version", placeholder="e.g. v2 - shorter, more adaptations")
-    if c2.button("Save as new version", disabled=not new_name.strip(), use_container_width=True):
+    if c2.button("Save as new version", disabled=not new_name.strip(), width="stretch"):
         new_id = db.save_prompt_version(new_name.strip(), system_prompt, user_template, user)
         st.success(f"Saved as version #{new_id}. Select it in the dropdown above.")
         st.rerun()
