@@ -63,3 +63,21 @@ def test_pagination(tmp_path, monkeypatch):
     assert [b for b in at.button if b.label == "Next ▶"][0].disabled
     at.selectbox[-1].select(25).run()                                   # changing page size returns to page 1
     assert any("Page 1 of 1" in m.value for m in at.markdown)
+
+
+def test_summary_lives_in_its_own_tab(tmp_path, monkeypatch):
+    url = f"sqlite:///{tmp_path / 's.db'}"
+    monkeypatch.setenv("DATABASE_URL", url)
+    eng = sa.create_engine(url)
+    db.init_db(eng)
+    for m, r in [("a/x", 5), ("a/x", 3), ("b/y", None)]:
+        db.insert_run(dict(user_email="a@b.c", model=m, prompt_version_id=1, output="o", rating=r,
+                           cost_usd=0.01, latency_ms=2000), eng)
+    at = AppTest.from_file(str(ROOT / "views/history.py"), default_timeout=30)
+    at.session_state["user"] = "a@b.c"
+    at.run()
+    assert not at.exception, at.exception
+    assert [t.label for t in at.tabs] == ["Runs", "Model comparison"]
+    summary = at.dataframe[0].value
+    top = summary.iloc[0]
+    assert top["model"] == "a/x" and top["runs"] == 2 and top["avg_rating"] == 4.0   # best-rated first
