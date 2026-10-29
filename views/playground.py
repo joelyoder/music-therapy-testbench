@@ -6,12 +6,14 @@ import streamlit as st
 from lib import db
 from lib.config import load_models, secret
 from lib.llm import VARIABLE_RE, render_template, run_model
+from lib.models import fetch_all_models, under_ceiling
 
 user = st.session_state["user"]
 models = load_models()
 model_by_id = {m["id"]: m for m in models}
 MAX_TOKENS_CAP = int(secret("max_tokens_cap", 4000))
 DAILY_LIMIT = int(secret("max_runs_per_user_per_day", 100))
+PRICE_CEILING = float(secret("max_output_price_per_m", 20))  # USD per 1M output tokens
 
 st.title("Session Idea Playground")
 
@@ -49,9 +51,30 @@ with st.expander("2. Session inputs", expanded=True):
 # ---------------- Models ----------------
 with st.expander("3. Models & settings", expanded=True):
     chosen = st.multiselect(
-        "Models (pick 1-4; more than one = side-by-side compare)",
+        "Starred models (pick up to 4 in total, including any from the list below)",
         [m["id"] for m in models], default=[models[0]["id"]], max_selections=4,
         format_func=lambda i: f'{model_by_id[i]["label"]}  [{i}]')
+
+    all_models, fetch_err = fetch_all_models()
+    extra = []
+    if fetch_err:
+        st.caption(f"Couldn't load the full OpenRouter list ({fetch_err}). Starred models still work.")
+    else:
+        allow_pricey = st.checkbox(
+            f"Include models priced above ${PRICE_CEILING:g} per 1M output tokens (can be expensive)", value=False)
+        pool = all_models if allow_pricey else under_ceiling(all_models, PRICE_CEILING)
+        pool = [m for m in pool if m["id"] not in model_by_id]
+        pool_by_id = {m["id"]: m for m in pool}
+        st.caption(f"{len(pool)} more models available. Type to search by name or provider.")
+        extra = st.multiselect(
+            "More models (all of OpenRouter)", list(pool_by_id), max_selections=max(4 - len(chosen), 0),
+            format_func=lambda i: f'{pool_by_id[i]["label"]}  [{i}] - ${pool_by_id[i]["in"]:.2f} in / ${pool_by_id[i]["out"]:.2f} out per 1M')
+        for i in extra:
+            model_by_id[i] = pool_by_id[i]
+        chosen = chosen + extra
+    if len(chosen) > 4:
+        st.error("Pick at most 4 models in total.")
+        chosen = chosen[:4]
     c1, c2 = st.columns(2)
     temperature = c1.slider("Temperature", 0.0, 1.5, 0.7, 0.05)
     max_tokens = c2.number_input("Max output tokens", 100, MAX_TOKENS_CAP, min(1500, MAX_TOKENS_CAP), 100)
@@ -88,7 +111,7 @@ if go:
                              setting=setting, notes=notes, num_ideas=int(num_ideas)),
             rendered_user_prompt=rendered, model=mid, temperature=temperature, max_tokens=int(max_tokens),
             **res)))
-    st.session_state["last_runs"] = list(zip(ids, chosen, results))
+    st.session_state["last_runs"] = [(i, m, r, model_by_id[m]["label"]) for i, m, r in zip(ids, chosen, results)]
 
 # ---------------- Results ----------------
 last = st.session_state.get("last_runs")
@@ -96,9 +119,9 @@ if last:
     st.divider()
     st.subheader("Results")
     cols = st.columns(len(last))
-    for col, (run_id, mid, res) in zip(cols, last):
+    for col, (run_id, mid, res, label) in zip(cols, last):
         with col:
-            st.markdown(f"**{model_by_id[mid]['label']}**")
+            st.markdown(f"**{label}**  \n`{mid}`")
             if res["error"]:
                 st.error(res["error"])
             else:
