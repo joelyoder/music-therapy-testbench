@@ -1,6 +1,6 @@
 import hashlib
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import sqlalchemy as sa
 import streamlit as st
@@ -207,15 +207,6 @@ def update_feedback(run_id: int, rating, notes, engine=None):
     engine = engine or get_engine()
     with engine.begin() as c:
         c.execute(sa.update(runs).where(runs.c.id == run_id).values(rating=rating, notes=notes))
-
-
-def count_runs_today(user, engine=None) -> int:
-    engine = engine or get_engine()
-    since = _now() - timedelta(hours=24)
-    with engine.connect() as c:
-        return c.execute(
-            sa.select(sa.func.count()).select_from(runs)
-            .where(runs.c.user_email == user, runs.c.created_at >= since)).scalar()
 
 
 def fetch_runs(engine=None):

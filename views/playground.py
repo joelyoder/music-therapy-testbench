@@ -14,7 +14,6 @@ user = st.session_state["user"]
 models = load_models()
 model_by_id = {m["id"]: m for m in models}
 MAX_TOKENS_CAP = int(secret("max_tokens_cap", 8000))
-DAILY_LIMIT = int(secret("max_runs_per_user_per_day", 100))
 PRICE_CEILING = float(secret("max_output_price_per_m", 20))  # USD per 1M output tokens
 
 st.title("Session Idea Playground")
@@ -115,11 +114,7 @@ with st.expander("Preview the exact messages that will be sent"):
     t_user.code(rendered, language="markdown")
     t_sys.code(system_rendered, language="markdown")
 
-used = db.count_runs_today(user)
-st.caption(f"Runs in the last 24h: {used}/{DAILY_LIMIT}")
-go = st.button("Generate", type="primary", disabled=not chosen or used + len(chosen) > DAILY_LIMIT)
-if used + len(chosen) > DAILY_LIMIT:
-    st.error("Daily run limit reached for your account.")
+go = st.button("Generate", type="primary", disabled=not chosen)
 
 if go:
     group = uuid.uuid4().hex[:12]

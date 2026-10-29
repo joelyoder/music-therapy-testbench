@@ -28,7 +28,7 @@ Fallback if Google setup is a hassle: remove the `[auth]` section and set `app_p
 
 - Fails closed: with no login configured, nobody gets in.
 - API key is only used server-side; the browser never sees it.
-- Starred models come from `models.json`; the "More models" picker lists all of OpenRouter live, hiding anything above `max_output_price_per_m` unless the user ticks the opt-in box. Output tokens capped by `max_tokens_cap`; per-user daily run limit.
+- Starred models come from `models.json`; the "More models" picker lists all of OpenRouter live, hiding anything above `max_output_price_per_m` unless the user ticks the opt-in box. Output tokens capped by `max_tokens_cap`. There is no per-user run limit; the spending limit on your OpenRouter key is the backstop.
 
 ## Example sets
 

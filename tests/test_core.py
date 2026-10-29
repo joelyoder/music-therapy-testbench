@@ -65,4 +65,3 @@ def test_db_roundtrip(tmp_path):
     db.update_feedback(rid, 4, "good", eng)
     run = db.fetch_runs(eng)[0]
     assert run["rating"] == 4 and run["notes"] == "good"
-    assert db.count_runs_today("a@b.c", eng) == 1
