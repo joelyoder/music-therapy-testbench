@@ -126,3 +126,20 @@ def test_library_cleaner_keeps_nested_list_indentation():
     text, links = convert('<ol>\n \t<li>Warm up\n<ul>\n \t<li>slow tempo</li>\n</ul>\n</li>\n \t<li>Pass the <a href="https://x.y">beat</a></li>\n</ol>')
     assert text == "1. Warm up\n  - slow tempo\n2. Pass the beat"
     assert links == [{"text": "beat", "url": "https://x.y"}]
+
+
+def test_stale_cached_engine_is_not_reused_after_schema_change(tmp_path, monkeypatch):
+    """Redeploys keep Streamlit's cache alive; the engine must be rebuilt (and tables created) when the schema changes."""
+    url = f"sqlite:///{tmp_path / 'stale_engine.db'}"
+    monkeypatch.setenv("DATABASE_URL", url)
+    eng = db.get_engine()                       # what the old deploy created and cached
+    with eng.begin() as c:
+        c.execute(sa.text("DROP TABLE example_sets"))   # state of a database that predates the table
+    assert db.list_example_sets.__name__          # (table missing now)
+    try:
+        db.list_example_sets()
+        assert False, "table should be missing"
+    except sa.exc.OperationalError:
+        pass
+    monkeypatch.setattr(db, "_fingerprint", lambda: "new-schema")   # new code => new fingerprint
+    assert db.list_example_sets() == []         # engine rebuilt, init_db re-ran, table recreated

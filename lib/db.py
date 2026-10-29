@@ -1,3 +1,4 @@
+import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -114,12 +115,24 @@ def _normalize_url(url: str) -> str:
     return url
 
 
+def _fingerprint() -> str:
+    """Changes whenever a table or column is added/removed, so a cached engine from older code is not reused."""
+    spec = ";".join(f"{t.name}:{','.join(c.name for c in t.columns)}" for t in metadata.sorted_tables)
+    return hashlib.md5(spec.encode()).hexdigest()
+
+
 @st.cache_resource
-def get_engine():
-    url = secret("database_url") or f"sqlite:///{ROOT / 'testbench.db'}"
+def _engine_for(url: str, fingerprint: str):
+    # `fingerprint` is part of the cache key. Streamlit keeps cached resources alive across redeploys, so without it
+    # an engine created by older code would be reused and init_db (which creates/upgrades tables) would never rerun.
     engine = sa.create_engine(_normalize_url(url), pool_pre_ping=True)
     init_db(engine)
     return engine
+
+
+def get_engine():
+    url = secret("database_url") or f"sqlite:///{ROOT / 'testbench.db'}"
+    return _engine_for(url, _fingerprint())
 
 
 def _add_missing_columns(engine, table):
