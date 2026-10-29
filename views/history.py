@@ -9,7 +9,7 @@ from lib.config import secret
 
 TZ = secret("display_timezone", "America/New_York")
 PAGE_SIZES = [10, 25, 50]
-COLS = [0.5, 1.3, 1.2, 2.2, 1.7, 0.9, 1.0, 0.7, 2.6, 1.1]  # id, when, user, model, prompt, rating, cost, time, preview, button
+COLS = [0.7, 1.3, 1.4, 2.0, 2.1, 0.9, 1.0, 0.9, 1.8, 1.1]  # id, when, user, model, prompt+examples, rating, cost, time, preview, button  # id, when, user, model, prompt, rating, cost, time, preview, button
 
 st.title("Run History")
 rows = db.fetch_runs()
@@ -33,16 +33,20 @@ def clean(v):
 versions = {v["id"]: f'#{v["id"]} {v["name"]}' for v in db.list_prompt_versions()}
 df = pd.DataFrame(rows)
 df["prompt"] = df["prompt_version_id"].map(versions).fillna("(edited, unsaved)")
+set_names = {x["id"]: f'#{x["id"]} {x["name"]}' for x in db.list_example_sets()}
+df["examples"] = df["example_set_id"].map(set_names).fillna("none")
 
 # ---------------- Filters ----------------
-c1, c2, c3, c4 = st.columns(4)
+c1, c2, c3, c4, c5 = st.columns(5)
 f_model = c1.multiselect("Model", sorted(df["model"].dropna().unique()))
 f_prompt = c2.multiselect("Prompt version", sorted(df["prompt"].unique()))
-f_user = c3.multiselect("User", sorted(df["user_email"].dropna().unique()))
-f_rating = c4.selectbox("Rating", ["any", "rated only", "4+", "<= 2"])
+f_examples = c3.multiselect("Example set", sorted(df["examples"].unique()))
+f_user = c4.multiselect("User", sorted(df["user_email"].dropna().unique()))
+f_rating = c5.selectbox("Rating", ["any", "rated only", "4+", "<= 2"])
 
 if f_model: df = df[df["model"].isin(f_model)]
 if f_prompt: df = df[df["prompt"].isin(f_prompt)]
+if f_examples: df = df[df["examples"].isin(f_examples)]
 if f_user: df = df[df["user_email"].isin(f_user)]
 if f_rating == "rated only": df = df[df["rating"].notna()]
 elif f_rating == "4+": df = df[df["rating"] >= 4]
@@ -56,17 +60,18 @@ with tab_summary:
     if df.empty:
         st.info("No runs match these filters.")
     else:
-        summary = (df.groupby(["model", "prompt"], dropna=False)
+        summary = (df.groupby(["model", "prompt", "examples"], dropna=False)
                      .agg(runs=("id", "count"), rated=("rating", "count"), avg_rating=("rating", "mean"),
                           avg_cost=("cost_usd", "mean"), avg_time=("latency_ms", lambda s: s.mean() / 1000))
                      .reset_index()
                      .sort_values(["avg_rating", "runs"], ascending=[False, False], na_position="last"))
         st.dataframe(
             summary, width="stretch", hide_index=True,
-            column_order=["model", "prompt", "runs", "rated", "avg_rating", "avg_cost", "avg_time"],
+            column_order=["model", "prompt", "examples", "runs", "rated", "avg_rating", "avg_cost", "avg_time"],
             column_config={
                 "model": st.column_config.TextColumn("Model"),
                 "prompt": st.column_config.TextColumn("Prompt version"),
+                "examples": st.column_config.TextColumn("Example set"),
                 "runs": st.column_config.NumberColumn("Runs", format="%d"),
                 "rated": st.column_config.NumberColumn("Rated runs", format="%d",
                                                        help="How many of these runs have a rating"),
@@ -90,10 +95,11 @@ def show_run(r: dict):
                + (f"${cost:.4f}" if cost is not None else "cost n/a"))
     if clean(r["error"]):
         st.error(clean(r["error"]))
-    t1, t2, t3 = st.tabs(["Output", "Message sent", "System prompt"])
+    t1, t2, t3, t4 = st.tabs(["Output", "Message sent", "System prompt", f"Examples ({r['examples']})"])
     t1.markdown(clean(r["output"]) or "")
     t2.code(clean(r["rendered_user_prompt"]) or "", language="markdown")
     t3.code(clean(r["system_prompt"]) or "", language="markdown")
+    t4.code(clean(r["examples_text"]) or "(no examples were sent)", language="markdown")
 
 
 with tab_runs:
@@ -113,7 +119,7 @@ with tab_runs:
     pages = max(1, math.ceil(total / page_size))
 
     # go back to page 1 whenever the filters or page size change
-    sig = (tuple(f_model), tuple(f_prompt), tuple(f_user), f_rating, page_size)
+    sig = (tuple(f_model), tuple(f_prompt), tuple(f_examples), tuple(f_user), f_rating, page_size)
     if st.session_state.get("hist_sig") != sig:
         st.session_state["hist_sig"] = sig
         st.session_state["hist_page"] = 0
@@ -129,7 +135,7 @@ with tab_runs:
     pc4.button("Next ▶", on_click=go, args=(1,), disabled=page >= pages - 1, width="stretch")
 
     header = st.columns(COLS)
-    for col, name in zip(header, ["ID", "When (ET)" if TZ == "America/New_York" else "When", "User", "Model", "Prompt",
+    for col, name in zip(header, ["ID", "When (ET)" if TZ == "America/New_York" else "When", "User", "Model", "Prompt / examples",
                                   "Rating", "Cost", "Time", "Output preview", ""]):
         col.markdown(f"**{name}**")
 
@@ -142,6 +148,7 @@ with tab_runs:
         c[2].write((r["user_email"] or "?").split("@")[0])
         c[3].write(r["model"])
         c[4].write(r["prompt"])
+        c[4].caption(f'Examples: {r["examples"]}')
         c[5].write(f"{int(rating)} ★" if rating is not None else "—")
         c[6].write(f"${cost:.4f}" if cost is not None else "—")
         c[7].write(f"{ms / 1000:.1f}s" if ms is not None else "—")

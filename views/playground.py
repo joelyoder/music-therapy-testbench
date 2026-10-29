@@ -1,3 +1,4 @@
+import re
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
@@ -5,6 +6,7 @@ import streamlit as st
 
 from lib import db
 from lib.config import load_models, secret
+from lib.library import describe
 from lib.llm import VARIABLE_RE, render_template, run_model
 from lib.models import fetch_all_models, under_ceiling
 
@@ -25,7 +27,7 @@ with st.expander("1. System prompt & template", expanded=True):
     ver = next(v for v in versions if v["id"] == sel_id)
     system_prompt = st.text_area("System prompt", ver["system_prompt"], height=220, key=f"sys_{sel_id}")
     user_template = st.text_area(
-        "User message template (use {{population}}, {{goals}}, {{session_length}}, {{setting}}, {{notes}}, {{num_ideas}})",
+        "User message template (variables: {{population}}, {{goals}}, {{session_length}}, {{setting}}, {{notes}}, {{num_ideas}}; {{examples}} also works in the system prompt)",
         ver["user_template"], height=160, key=f"tpl_{sel_id}")
     edited = (system_prompt != ver["system_prompt"]) or (user_template != ver["user_template"])
     if edited:
@@ -37,8 +39,27 @@ with st.expander("1. System prompt & template", expanded=True):
         st.success(f"Saved as version #{new_id}. Select it in the dropdown above.")
         st.rerun()
 
+# ---------------- Examples ----------------
+example_sets = db.list_example_sets()
+set_by_id = {x["id"]: x for x in example_sets}
+SLOT_RE = re.compile(r"\{\{\s*examples\s*\}\}")
+with st.expander("2. Examples", expanded=True):
+    ex_id = st.selectbox(
+        "Example set", [None] + [x["id"] for x in example_sets], index=1 if example_sets else 0,
+        format_func=lambda i: "None (no examples)" if i is None
+        else f'#{i} {set_by_id[i]["name"]}  ·  {describe(set_by_id[i]["content"])}')
+    examples_text = set_by_id[ex_id]["content"] if ex_id else ""
+    has_slot = bool(SLOT_RE.search(system_prompt + user_template))
+    if not example_sets:
+        st.caption("No example sets yet. Create one on the Example Sets page.")
+    elif ex_id and not has_slot:
+        st.warning("This prompt has no {{examples}} placeholder, so the selected examples will NOT be sent. "
+                   "Add it to the system prompt, or pick a prompt version that has it.")
+    elif has_slot and not ex_id:
+        st.info("This prompt has an {{examples}} slot but no set is selected, so it will be empty.")
+
 # ---------------- Inputs ----------------
-with st.expander("2. Session inputs", expanded=True):
+with st.expander("3. Session inputs", expanded=True):
     c1, c2 = st.columns(2)
     population = c1.text_input("Population / client group", "Adults with early-stage dementia")
     goals = c2.text_input("Goals", "Reminiscence, social engagement, mood")
@@ -49,7 +70,7 @@ with st.expander("2. Session inputs", expanded=True):
     notes = st.text_area("Additional notes (no client names or identifying details)", "", height=80)
 
 # ---------------- Models ----------------
-with st.expander("3. Models & settings", expanded=True):
+with st.expander("4. Models & settings", expanded=True):
     chosen = st.multiselect(
         "Starred models (pick up to 4 in total, including any from the list below)",
         [m["id"] for m in models], default=[models[0]["id"]], max_selections=4,
@@ -80,13 +101,17 @@ with st.expander("3. Models & settings", expanded=True):
     max_tokens = c2.number_input("Max output tokens", 100, MAX_TOKENS_CAP, min(1500, MAX_TOKENS_CAP), 100)
 
 # ---------------- Run ----------------
-rendered, unknown = render_template(
-    user_template, dict(population=population, goals=goals, session_length=session_length,
-                        setting=setting, notes=notes, num_ideas=num_ideas))
+values = dict(population=population, goals=goals, session_length=session_length, setting=setting,
+              notes=notes, num_ideas=num_ideas, examples=examples_text)
+system_rendered, unknown_sys = render_template(system_prompt, values, allow_empty=("examples",))
+rendered, unknown_user = render_template(user_template, values, allow_empty=("examples",))
+unknown = unknown_sys + unknown_user
 if unknown:
-    st.warning(f"Template uses unknown variables (sent as-is): {', '.join(sorted(set(unknown)))}")
-with st.expander("Preview the exact message that will be sent"):
-    st.code(rendered, language="markdown")
+    st.warning(f"Prompt uses unknown variables (sent as-is): {', '.join(sorted(set(unknown)))}")
+with st.expander("Preview the exact messages that will be sent"):
+    t_user, t_sys = st.tabs(["User message", "System prompt (examples filled in)"])
+    t_user.code(rendered, language="markdown")
+    t_sys.code(system_rendered, language="markdown")
 
 used = db.count_runs_today(user)
 st.caption(f"Runs in the last 24h: {used}/{DAILY_LIMIT}")
@@ -99,7 +124,7 @@ if go:
     with st.spinner(f"Running {len(chosen)} model(s)..."):
         with ThreadPoolExecutor(max_workers=len(chosen)) as ex:
             results = list(ex.map(
-                lambda mid: run_model(model_by_id[mid], system_prompt, rendered, temperature, int(max_tokens)),
+                lambda mid: run_model(model_by_id[mid], system_rendered, rendered, temperature, int(max_tokens)),
                 chosen))
     ids = []
     for mid, res in zip(chosen, results):
@@ -107,6 +132,7 @@ if go:
             user_email=user, compare_group=group,
             prompt_version_id=None if edited else sel_id,
             system_prompt=system_prompt, user_template=user_template,
+            example_set_id=ex_id, examples_text=examples_text or None,
             inputs_json=dict(population=population, goals=goals, session_length=session_length,
                              setting=setting, notes=notes, num_ideas=int(num_ideas)),
             rendered_user_prompt=rendered, model=mid, temperature=temperature, max_tokens=int(max_tokens),

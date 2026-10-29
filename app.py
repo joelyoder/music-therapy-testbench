@@ -15,5 +15,6 @@ with st.sidebar:
 pg = st.navigation([
     st.Page("views/playground.py", title="Playground", icon="🧪", default=True),
     st.Page("views/history.py", title="History", icon="📜"),
+    st.Page("views/examples.py", title="Example Sets", icon="📚"),
 ])
 pg.run()

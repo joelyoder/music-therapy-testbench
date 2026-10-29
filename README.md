@@ -30,7 +30,14 @@ Fallback if Google setup is a hassle: remove the `[auth]` section and set `app_p
 - API key is only used server-side; the browser never sees it.
 - Starred models come from `models.json`; the "More models" picker lists all of OpenRouter live, hiding anything above `max_output_price_per_m` unless the user ticks the opt-in box. Output tokens capped by `max_tokens_cap`; per-user daily run limit.
 
+## Example sets
+
+Prompts can include a swappable set of example sessions (to teach structure, tone and quality) via the `{{examples}}` placeholder. On the **Example Sets** page, upload `library.json`, pick entries, and save a set; or paste/edit text directly. Pick the set in the Playground; every run records which set was used, so History can compare sets. The upload is read in-session only and never stored; only the entries you pick are saved.
+
+Regenerate the library file with: `python -I scripts/build_library.py EXPORT.xml data/`
+
 ## Layout
 
-- `app.py` entry + navigation; `views/playground.py` generate/compare; `views/history.py` filters, per-model summary, CSV export
+- `app.py` entry + navigation; `views/playground.py` generate/compare; `views/history.py` runs table, model comparison, CSV export; `views/examples.py` build/save example sets
+- `scripts/build_library.py` cleans a WordPress export into `library.json` (kept out of git)
 - `lib/` auth, db (SQLAlchemy; SQLite or Postgres), llm (OpenRouter via OpenAI SDK)

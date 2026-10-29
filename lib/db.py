@@ -18,6 +18,15 @@ prompt_versions = sa.Table(
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
 )
 
+example_sets = sa.Table(
+    "example_sets", metadata,
+    sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
+    sa.Column("name", sa.String(200), nullable=False),
+    sa.Column("content", sa.Text, nullable=False),
+    sa.Column("created_by", sa.String(200)),
+    sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+)
+
 runs = sa.Table(
     "runs", metadata,
     sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
@@ -27,6 +36,8 @@ runs = sa.Table(
     sa.Column("prompt_version_id", sa.Integer),  # null if the prompt was edited and not saved
     sa.Column("system_prompt", sa.Text),         # exact snapshot used
     sa.Column("user_template", sa.Text),
+    sa.Column("example_set_id", sa.Integer),     # null = no examples used
+    sa.Column("examples_text", sa.Text),         # exact examples text sent (snapshot)
     sa.Column("inputs_json", sa.Text),
     sa.Column("rendered_user_prompt", sa.Text),
     sa.Column("model", sa.String(200)),
@@ -60,6 +71,37 @@ Setting: {{setting}}
 Additional notes: {{notes}}"""
 
 
+V2_NAME = "v2 - house style with examples"
+V2_SYSTEM = """You are an experienced board-certified music therapist and clinical supervisor helping a fellow music therapist plan sessions.
+
+Write session ideas in the house style of the examples below: practical, warm, concrete, and specific enough that a clinician can run the session without further research. Match the examples' structure, tone, and level of detail.
+
+Format every idea exactly like this:
+
+### <Title>
+**Population:** ... · **Domain:** ... · **Method:** ... · **Equipment:** ...
+
+<1-3 sentences: what the experience is and why it works.>
+
+**Instructions**
+1. Numbered steps a clinician can follow, in order.
+   - Indented bullets for adaptations, variations, or what to watch for.
+
+**Notes / resources** (optional): song ideas, variations, or printable suggestions.
+
+Use these terms for the tags. Method: Receptive, Re-creative, Improvisational, or Compositional. Domain: Communicative, Cognitive, Musical, Emotional, Sensorimotor, Psychosocial, or Physiological.
+
+Rules:
+- The examples show style only. Do NOT reuse their ideas, titles, or songs; create new ideas for the requested population and goals.
+- Never ask for or include client names or identifying details.
+- Keep ideas realistic for the stated setting and session length.
+- Do not refer to videos, handouts, named instructors, or other materials you cannot provide.
+
+<examples>
+{{examples}}
+</examples>"""
+
+
 def _now():
     return datetime.now(timezone.utc)
 
@@ -80,13 +122,30 @@ def get_engine():
     return engine
 
 
+def _add_missing_columns(engine, table):
+    """create_all never alters existing tables, so add any columns an older deploy lacks."""
+    existing = {c["name"] for c in sa.inspect(engine).get_columns(table.name)}
+    with engine.begin() as c:
+        for col in table.columns:
+            if col.name not in existing:
+                ctype = col.type.compile(dialect=engine.dialect)
+                c.execute(sa.text(f'ALTER TABLE {table.name} ADD COLUMN {col.name} {ctype}'))
+
+
 def init_db(engine):
     metadata.create_all(engine)
+    _add_missing_columns(engine, runs)
     with engine.begin() as c:
         n = c.execute(sa.select(sa.func.count()).select_from(prompt_versions)).scalar()
         if n == 0:
             c.execute(sa.insert(prompt_versions).values(
                 name="v1 - baseline", system_prompt=DEFAULT_SYSTEM, user_template=DEFAULT_TEMPLATE,
+                created_by="system", created_at=_now()))
+        has_v2 = c.execute(sa.select(sa.func.count()).select_from(prompt_versions)
+                           .where(prompt_versions.c.name == V2_NAME)).scalar()
+        if not has_v2:
+            c.execute(sa.insert(prompt_versions).values(
+                name=V2_NAME, system_prompt=V2_SYSTEM, user_template=DEFAULT_TEMPLATE,
                 created_by="system", created_at=_now()))
 
 
@@ -103,6 +162,21 @@ def save_prompt_version(name, system_prompt, user_template, user, engine=None) -
         res = c.execute(sa.insert(prompt_versions).values(
             name=name, system_prompt=system_prompt, user_template=user_template,
             created_by=user, created_at=_now()))
+        return res.inserted_primary_key[0]
+
+
+def list_example_sets(engine=None):
+    engine = engine or get_engine()
+    with engine.connect() as c:
+        rows = c.execute(sa.select(example_sets).order_by(example_sets.c.id.desc())).mappings().all()
+    return [dict(r) for r in rows]
+
+
+def save_example_set(name, content, user, engine=None) -> int:
+    engine = engine or get_engine()
+    with engine.begin() as c:
+        res = c.execute(sa.insert(example_sets).values(
+            name=name, content=content, created_by=user, created_at=_now()))
         return res.inserted_primary_key[0]
 
 

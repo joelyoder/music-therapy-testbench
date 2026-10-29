@@ -9,14 +9,17 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1"
 VARIABLE_RE = re.compile(r"\{\{\s*(\w+)\s*\}\}")
 
 
-def render_template(template: str, values: dict) -> tuple[str, list[str]]:
-    """Fill {{var}} placeholders. Returns (text, unknown_variable_names)."""
+def render_template(template: str, values: dict, allow_empty=()) -> tuple[str, list[str]]:
+    """Fill {{var}} placeholders. Returns (text, unknown_variable_names).
+
+    Blank values become "(not specified)" unless the variable is listed in allow_empty."""
     unknown = []
 
     def sub(m):
         key = m.group(1)
         if key in values:
-            return str(values[key]).strip() or "(not specified)"
+            val = str(values[key]).strip()
+            return val if (val or key in allow_empty) else "(not specified)"
         unknown.append(key)
         return m.group(0)
 

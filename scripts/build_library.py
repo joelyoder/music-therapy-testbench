@@ -57,7 +57,8 @@ class HtmlToText(HTMLParser):
 
     def result(self):
         text = "".join(self.out).replace("\xa0", " ")
-        lines = [re.sub(r"[ \t]+", " ", l).rstrip() for l in text.splitlines()]
+        # collapse repeated spaces inside a line but keep its leading indentation (nested lists)
+        lines = [" " * (len(l) - len(l.lstrip(" "))) + re.sub(r"[ \t]+", " ", l.strip()) for l in text.splitlines()]
         text = "\n".join(l for l in lines if l.strip())
         return text.strip()
 

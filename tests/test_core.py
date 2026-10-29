@@ -56,7 +56,9 @@ def test_db_roundtrip(tmp_path):
     eng = sa.create_engine(f"sqlite:///{tmp_path/'t.db'}")
     db.init_db(eng)
     vs = db.list_prompt_versions(eng)
-    assert len(vs) == 1
+    assert {v["name"] for v in vs} == {"v1 - baseline", db.V2_NAME}   # baseline + the house-style prompt
+    db.init_db(eng)                                                   # re-running must not duplicate them
+    assert len(db.list_prompt_versions(eng)) == 2
     vid = db.save_prompt_version("v2", "sys", "tpl", "a@b.c", eng)
     assert db.list_prompt_versions(eng)[0]["id"] == vid
     rid = db.insert_run(dict(user_email="a@b.c", model="x/y", output="o", inputs_json={"a": 1}), eng)
