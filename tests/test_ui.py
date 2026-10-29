@@ -24,3 +24,13 @@ def test_generate_flow(tmp_path, monkeypatch):
         at.button[[b.label for b in at.button].index("Generate")].click().run()
         assert not at.exception, at.exception
         assert any("IDEAS from" in m.value for m in at.markdown), [m.value for m in at.markdown][:5]
+
+
+def test_stale_results_from_older_version_do_not_crash(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'stale.db'}")
+    at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=30)
+    # shapes that older deploys stored in the browser session
+    at.session_state["last_runs"] = [(1, "a/b", {"output": "x", "error": None, "tokens_in": 1,
+                                                 "tokens_out": 1, "cost_usd": 0, "latency_ms": 1})]
+    at.run()
+    assert not at.exception, at.exception

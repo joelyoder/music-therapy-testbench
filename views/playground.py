@@ -111,15 +111,20 @@ if go:
                              setting=setting, notes=notes, num_ideas=int(num_ideas)),
             rendered_user_prompt=rendered, model=mid, temperature=temperature, max_tokens=int(max_tokens),
             **res)))
-    st.session_state["last_runs"] = [(i, m, r, model_by_id[m]["label"]) for i, m, r in zip(ids, chosen, results)]
+    st.session_state["last_runs"] = [
+        {"run_id": i, "model": m, "res": r, "label": model_by_id[m]["label"]}
+        for i, m, r in zip(ids, chosen, results)]
 
 # ---------------- Results ----------------
 last = st.session_state.get("last_runs")
+if last and not all(isinstance(x, dict) for x in last):
+    last = st.session_state["last_runs"] = None  # stale format from before a redeploy: drop it, don't crash
 if last:
     st.divider()
     st.subheader("Results")
     cols = st.columns(len(last))
-    for col, (run_id, mid, res, label) in zip(cols, last):
+    for col, item in zip(cols, last):
+        run_id, mid, res, label = item["run_id"], item["model"], item["res"], item["label"]
         with col:
             st.markdown(f"**{label}**  \n`{mid}`")
             if res["error"]:
