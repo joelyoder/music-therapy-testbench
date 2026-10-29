@@ -46,6 +46,7 @@ runs = sa.Table(
     sa.Column("max_tokens", sa.Integer),
     sa.Column("output", sa.Text),
     sa.Column("error", sa.Text),
+    sa.Column("finish_reason", sa.String(40)),   # "length" = output was cut off at max tokens
     sa.Column("tokens_in", sa.Integer),
     sa.Column("tokens_out", sa.Integer),
     sa.Column("cost_usd", sa.Float),

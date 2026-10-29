@@ -95,6 +95,8 @@ def show_run(r: dict):
                + (f"${cost:.4f}" if cost is not None else "cost n/a"))
     if clean(r["error"]):
         st.error(clean(r["error"]))
+    if clean(r["finish_reason"]) == "length":
+        st.warning("This response was cut off: it hit the max output tokens limit.")
     t1, t2, t3, t4 = st.tabs(["Output", "Message sent", "System prompt", f"Examples ({r['examples']})"])
     t1.markdown(clean(r["output"]) or "")
     t2.code(clean(r["rendered_user_prompt"]) or "", language="markdown")
@@ -152,7 +154,8 @@ with tab_runs:
         c[5].write(f"{int(rating)} ★" if rating is not None else "—")
         c[6].write(f"${cost:.4f}" if cost is not None else "—")
         c[7].write(f"{ms / 1000:.1f}s" if ms is not None else "—")
-        c[8].caption("⚠ error" if err and not out else preview(out))
+        c[8].caption("⚠ error" if err and not out
+                     else ("✂ cut off · " if clean(r["finish_reason"]) == "length" else "") + preview(out))
         if c[9].button("View", key=f"view_{r['id']}", width="stretch"):
             show_run(r)
         st.divider()

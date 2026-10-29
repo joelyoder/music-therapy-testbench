@@ -54,9 +54,10 @@ def run_model(model: dict, system: str, user: str, temperature: float, max_token
             cost = usage.model_extra.get("cost")
         if cost is None:
             cost = estimate_cost(tin, tout, model.get("in"), model.get("out"))
-        return {"output": resp.choices[0].message.content or "", "error": None,
+        choice = resp.choices[0]
+        return {"output": choice.message.content or "", "error": None, "finish_reason": getattr(choice, "finish_reason", None),
                 "tokens_in": tin, "tokens_out": tout, "cost_usd": cost, "latency_ms": latency}
     except Exception as e:  # noqa: BLE001 - surface any provider error to the UI
-        return {"output": "", "error": f"{type(e).__name__}: {e}", "tokens_in": None,
+        return {"output": "", "error": f"{type(e).__name__}: {e}", "finish_reason": None, "tokens_in": None,
                 "tokens_out": None, "cost_usd": None,
                 "latency_ms": int((time.perf_counter() - start) * 1000)}

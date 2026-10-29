@@ -13,7 +13,7 @@ from lib.models import fetch_all_models, under_ceiling
 user = st.session_state["user"]
 models = load_models()
 model_by_id = {m["id"]: m for m in models}
-MAX_TOKENS_CAP = int(secret("max_tokens_cap", 4000))
+MAX_TOKENS_CAP = int(secret("max_tokens_cap", 8000))
 DAILY_LIMIT = int(secret("max_runs_per_user_per_day", 100))
 PRICE_CEILING = float(secret("max_output_price_per_m", 20))  # USD per 1M output tokens
 
@@ -98,7 +98,9 @@ with st.expander("4. Models & settings", expanded=True):
         chosen = chosen[:4]
     c1, c2 = st.columns(2)
     temperature = c1.slider("Temperature", 0.0, 1.5, 0.7, 0.05)
-    max_tokens = c2.number_input("Max output tokens", 100, MAX_TOKENS_CAP, min(1500, MAX_TOKENS_CAP), 100)
+    max_tokens = c2.number_input("Max output tokens", 100, MAX_TOKENS_CAP, min(3000, MAX_TOKENS_CAP), 100,
+                                 help="Upper limit on the response length. If a response ends abruptly, raise this. "
+                                      "Thinking-style models also spend part of it on reasoning.")
 
 # ---------------- Run ----------------
 values = dict(population=population, goals=goals, session_length=session_length, setting=setting,
@@ -156,6 +158,9 @@ if last:
             if res["error"]:
                 st.error(res["error"])
             else:
+                if res.get("finish_reason") == "length":
+                    st.warning("Cut off: this response hit the Max output tokens limit. "
+                               "Raise it under \"4. Models & settings\" and run again.")
                 st.markdown(res["output"])
             cost = res["cost_usd"]
             st.caption(

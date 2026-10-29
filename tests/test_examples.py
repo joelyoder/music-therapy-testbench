@@ -143,3 +143,27 @@ def test_stale_cached_engine_is_not_reused_after_schema_change(tmp_path, monkeyp
         pass
     monkeypatch.setattr(db, "_fingerprint", lambda: "new-schema")   # new code => new fingerprint
     assert db.list_example_sets() == []         # engine rebuilt, init_db re-ran, table recreated
+
+
+def test_truncated_responses_are_flagged_in_playground_and_history(tmp_path, monkeypatch):
+    url = f"sqlite:///{tmp_path / 't.db'}"
+    monkeypatch.setenv("DEV_MODE", "1")
+    monkeypatch.setenv("DATABASE_URL", url)
+
+    def cut_off(model, system, user, temperature, max_tokens, client=None):
+        return {"output": "Idea 1: starts fine and then", "error": None, "finish_reason": "length",
+                "tokens_in": 5, "tokens_out": max_tokens, "cost_usd": 0.0, "latency_ms": 1}
+
+    with patch("lib.llm.run_model", cut_off):
+        at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=30).run()
+        at.button[[b.label for b in at.button].index("Generate")].click().run()
+        assert not at.exception, at.exception
+        assert any("Cut off" in w.value for w in at.warning)
+    run = db.fetch_runs(sa.create_engine(url))[0]
+    assert run["finish_reason"] == "length" and run["max_tokens"] == 3000     # new, roomier default
+
+    hist = AppTest.from_file(str(ROOT / "views/history.py"), default_timeout=30)
+    hist.session_state["user"] = "a@b.c"
+    hist.run()
+    assert not hist.exception, hist.exception
+    assert any("cut off" in c.value for c in hist.caption)
