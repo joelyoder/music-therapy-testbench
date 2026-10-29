@@ -20,9 +20,11 @@ def test_parse_models_filters_and_converts_prices():
         {"id": "openrouter/auto", "pricing": {"prompt": "-1", "completion": "-1"}},
         {"id": "a/no-price"},
         {"id": "a/free", "pricing": {"prompt": "0", "completion": "0"}},
+        {"id": "google/gemini-x:batch", "pricing": {"prompt": "0.000001", "completion": "0.000002"}},   # batch-only
+        {"id": "a/model:free", "pricing": {"prompt": "0", "completion": "0"}},                        # other variants are fine
     ]}
     got = {m["id"]: m for m in parse_models(payload)}
-    assert set(got) == {"a/ok", "a/free"}
+    assert set(got) == {"a/ok", "a/free", "a/model:free"}
     assert abs(got["a/ok"]["in"] - 1.0) < 1e-9 and abs(got["a/ok"]["out"] - 5.0) < 1e-9
 
 

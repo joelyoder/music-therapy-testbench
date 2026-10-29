@@ -4,11 +4,17 @@ import streamlit as st
 
 URL = "https://openrouter.ai/api/v1/models"
 
+# Variants (the part after ":" in an id) that exist on OpenRouter but can't be called through the
+# chat/completions endpoint this app uses. Batch variants are asynchronous jobs, not chat models.
+UNSUPPORTED_VARIANTS = {"batch"}
+
 
 def parse_models(payload: dict) -> list[dict]:
     """Keep text-output models with a fixed price. Prices become USD per 1M tokens."""
     out = []
     for m in payload.get("data", []):
+        if str(m.get("id", "")).rpartition(":")[2] in UNSUPPORTED_VARIANTS:
+            continue
         try:
             arch = m.get("architecture") or {}
             if "text" not in (arch.get("output_modalities") or ["text"]):
